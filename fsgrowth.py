@@ -3,7 +3,7 @@
 # fsgrowth - report the daily growth of filesystems through mail
 #
 #   Schedule in cron
-#   Writes historical data to a PyStore collection
+#   Writes historical data to ???
 #   Sends a report every time it's run with delta, growth and projection
 #   
 # 
@@ -14,12 +14,11 @@ import socket
 import shutil
 import os
 import sys
-import pystore
+#import pystore
 
 # }}}
 # Config {{{
 filesystems = ['/omd/data/archive08', '/omd/data/archive07']
-interval = 1
 environment = 'SEB'
 hostname = socket.gethostname()
 db = '/tmp/fsgrowth.db'
