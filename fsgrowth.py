@@ -2,9 +2,9 @@
 #
 # fsgrowth - report the daily growth of filesystems through mail
 #
-#   Schedule in cron
-#   Writes historical data to ???
-#   Sends a report every time it's run with delta, growth and projection
+# - Schedule in cron every hour or every day. Delta is given in seconds in report
+# - Writes to history file and compare delta
+# - Sends a report every time it's run with diff and delta
 #   
 # 
 #------------------------------------------------------------------------------
@@ -12,17 +12,16 @@
 import smtplib
 import socket
 import shutil
-from datetime import datetime
-import pandas as pd
-import matplotlib.pyplot as plt
 import os
+import pickle
+from datetime import datetime
 
 # }}}
 # Config {{{
-filesystems = ['/omd/data/archive08', '/omd/data/archive07', '/omd/data/archive06', '/omd/data/archive09']
+filesystems = ['/app/omd/data', '/omd/data/archive08', '/omd/data/archive09']
 environment = 'SEB'
 hostname = socket.gethostname()
-histfile = '/tmp/fsgrowth.csv'
+histfile = '/tmp/fsgrowth.db'
 
 # SMTP server
 smtphost = 'smtp.sebot.local'
@@ -35,69 +34,84 @@ smtprcvr = 'david.henden@addpro.se'
 #------------------------------------------------------------------------------
 def main():
 
+    # Check for old data to compare with
     if os.path.isfile(histfile):
-        dataframe = pd.read_csv(histfile)
-        print()
-        print('Found and loaded historical data!')
-        dataframe.info(verbose=False)
-        print()
+        history = pickle.load(open(histfile, 'rb'))
     else:
-        dataframe = None
+        history = {}
 
     # Setup a template and print headers
-#    template = '{0:30} {1:19} {2:>7} {3:>7} {4:>7} {5:>4}'
-#    print(template
-#        .format('Filesystem', 'Datetime', 'Total', 'Used', 'Free', 'Pct'))
-    columns = ['Filesystem', 'Datetime', 'Total', 'Used', 'Free', 'Pct']
-    template = '{0:30} {1:19} {2:>7,d} {2:>7,d} {4:>7,d} {5:>3,d}%'
+    template = '{0:30} {1:10} {2:>7} {3:>7} {4:>7} {5:>4} {6:>7} {7:>7}'
+    headers = template.format('Filesystem', 'Datetime', 'Total', 'Used',
+        'Free', 'Pct', 'Diff', 'Delta')
+    template = '{0:30} {1:%Y-%m-%d} {2:>7,d} {3:>7,d} {4:>7,d} {5:>3,d}% {6:>7,d} {7:>7,d}'
 
     # Loop file systems
     now = datetime.now()
-    fstotal = []
+    fstotal = {}
     for fs in filesystems:
         try:
             [total, used, free] = map(lambda x: round(x / 1024 / 1024 / 1024),
                  shutil.disk_usage(fs))
             pct = round((used / total) * 100)
-            fsrow = [fs, now, total, used, free, pct]
-            fstotal.append(fsrow)
+
+            # Add some deltas if we have a history
+            if fs in history:
+                used_delta = used - history[fs][2]
+                time_delta = now - history[fs][0]
+            else:
+                used_delta = 0
+                time_delta = now - now
+
+            # A complete fs row with metrics
+            fstotal[fs] = [now, total, used, free, pct, used_delta, time_delta]
 
         except Exception as e:
             print('{}: {}'.format(fs, e))
 
-    if dataframe is None:
-        dataframe = pd.DataFrame(fstotal, columns=columns)
-    else:
-        newframe = pd.DataFrame(fstotal, columns=columns)
-        dataframe = dataframe.append(newframe, ignore_index=True)
-            
-#    dataframe.to_csv(histfile, index=False)
-    report(dataframe)
+    # Prettify history
+    olddata = []
+    for fs, metrics in history.items():
+        olddata.append(template.format(fs, metrics[0], metrics[1], metrics[2],
+             metrics[3], metrics[4], metrics[5], metrics[6].seconds))
 
-    return None
+    # Prettify contemporary
+    data = []
+    for fs, metrics in fstotal.items():
+        data.append(template.format(fs, metrics[0], metrics[1], metrics[2],
+             metrics[3], metrics[4], metrics[5], metrics[6].seconds))
 
-# }}}
-# def report(dataframe): {{{
-#------------------------------------------------------------------------------
-def report(data):
+    olddata = '\n'.join(olddata)
+    data = '\n'.join(data)
 
-#    data= data.sort(columns=Datetime)
-    print(data)
-    data.set_index('Datetime').diff()
-    print(data)
+    # DEBUG
+    #    print('CONTEMPORARY\n{}'.format(data))
+    #    print('HISTORY\n{}'.format(olddata))
 
+    # Write history
+    pickle.dump(fstotal, open(histfile, 'wb'))
+
+    # Report to master
+    sendreport(headers, data, olddata)
+    
     return None
 
 
 # }}}
 # def sendmail(data): {{{
 #------------------------------------------------------------------------------
-def sendmail(data):
+def sendreport(headers, data, olddata):
     """Send email report"""
 
     message = """Subject: {environment} file system growth report for {hostname}
 
+{headers}
 {data}
+
+LAST REPORT
+
+{headers}
+{olddata}
 
 /fsgrowth reporter on {hostname}
 """
@@ -106,21 +120,16 @@ def sendmail(data):
         smtpserver = smtplib.SMTP(smtphost, smtpport)
         smtpserver.ehlo()
         smtpserver.sendmail(smtpfrom, smtprcvr, message
-            .format(environment=environment, data=data, hostname=hostname))
+            .format(environment=environment, headers=headers, data=data,
+                olddata=olddata, hostname=hostname))
     except Exception as e:
         print(e)
-#    finally:
-#        if smtpserver:
-#            smtpserver.quit() 
+    finally:
+        if smtpserver:
+            smtpserver.quit() 
 
     return None
 
-# }}}
-# def isotime(self, time): {{{
-#------------------------------------------------------------------------------
-    def isotime(self, time):
-        """Convert epoch to isotime"""
-        return '{}'.format(datetime.fromtimestamp(time).strftime('%Y-%m-%d %H:%M:%S'))
 
 # }}}
 
