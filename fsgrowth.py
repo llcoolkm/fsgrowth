@@ -73,13 +73,13 @@ def main():
     olddata = []
     for fs, metrics in history.items():
         olddata.append(template.format(fs, metrics[0], metrics[1], metrics[2],
-             metrics[3], metrics[4], metrics[5], metrics[6].seconds))
+             metrics[3], metrics[4], metrics[5], round(metrics[6].seconds / 3600)))
 
     # Prettify contemporary
     data = []
     for fs, metrics in fstotal.items():
         data.append(template.format(fs, metrics[0], metrics[1], metrics[2],
-             metrics[3], metrics[4], metrics[5], metrics[6].seconds))
+             metrics[3], metrics[4], metrics[5], round(metrics[6].seconds / 3600)))
 
     olddata = '\n'.join(olddata)
     data = '\n'.join(data)
