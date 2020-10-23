@@ -36,7 +36,7 @@ from pretty_html_table import build_table
 fs = '/omd/data/archive08'
 environment = 'SEB'
 hostname = socket.gethostname()
-historyfile = 'fsgrowth.db'
+historyfile = '/tmp/fsgrowth.db'
 
 # SMTP server
 smtphost = 'smtp.sebot.local'
@@ -64,14 +64,6 @@ def main():
     # Generate a graph
     graph = creategraph_pyplot(data)
 
-    # Export
-    if args.export_file:
-        try:
-            history.to_csv(args.export_file)
-            print('Wrote export file: {}'.format(args.export_file))
-        except Exception as e:
-            print(e)
-
     # Update history file - or not!
     if args.dont_update_history:
         if not args.quiet:
@@ -80,6 +72,14 @@ def main():
         # Write history pickle
         pickle.dump(data, open(historyfile, 'wb'))
         print('Updated history file: {}'.format(historyfile))
+
+    # Export
+    if args.export_file:
+        try:
+            history.to_csv(args.export_file)
+            print('Wrote export csv file: {}'.format(args.export_file))
+        except Exception as e:
+            print(e)
 
     # Fix the dataframe for reporting
     # Reverse it and drop boring columns
@@ -99,11 +99,11 @@ def main():
 def collectdata():
     """Collect data from all file systems and return as an array"""
 
-    now = datetime.now()
+    now = datetime.now().replace(microsecond=0)
 
     try:
         [total, used, free] = map(lambda x: int(round(x / 1024 / 1024 / 1024)),
-            shutil.disk_usage(fs)
+            shutil.disk_usage(fs))
 
         # Get pct
         if total == 0:
@@ -115,7 +115,7 @@ def collectdata():
             'free': free, 'pct': pct}
     except Exception as e:
         print('ERROR collecting filesystem data: {}'.format(e))
-        exit -1
+        exit(-1)
 
     print('Collected data for filesystem: {}'.format(fs))
 
@@ -125,7 +125,8 @@ def collectdata():
 # }}}
 #def creategraph_pyplot(data): {{{
 #------------------------------------------------------------------------------
-def creategraph_pyplot(data, fs):
+def creategraph_pyplot(data):
+    """Plot a beautiful graph and return a png in a string"""
 
     data['avg'] = data.free.rolling(7).mean().shift(-3)
     data['weekday'] = data.index.weekday
@@ -199,20 +200,20 @@ def loadhistory(importfile):
         try:
             history = pd.read_csv(importfile, parse_dates=['date'], index_col=['date'])
             if not args.quiet:
-                print('Imported csv file with {} data points: {}'
-                    .format(len(history), importfile))
+                print('Imported csv file {} with {} data points'
+                    .format(importfile, len(history))
         except Exception as e:
             print('Unable to import csv file: {}'.format(e))
             exit(-1)
 
-    # ...or load pickle
+    # ...or try to load a pickle
     else:
         if os.path.isfile(historyfile):
             try:
                 history = pickle.load(open(historyfile, 'rb'))
                 if not args.quiet:
-                    print('Imported history pickle with {} data points: {}'
-                        .format(len(history), historyfile))
+                    print('Imported history file {} with {} data points}'
+                        .format(historyfile, len(history)))
             except Exception as e:
                 print('Unable to load history file: {}'.format(e))
                 exit(-1)
