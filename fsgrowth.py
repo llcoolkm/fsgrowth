@@ -6,7 +6,7 @@
 # - Writes to history file and compare delta
 # - Sends a report every time it's run with diff and delta
 #   
-# pip3 install psutil pyplot pandas
+# pip3 install matplotlib pandas pretty_html_table
 # 
 #------------------------------------------------------------------------------
 # Imports {{{
@@ -16,7 +16,6 @@ import io
 import os
 import pickle
 import argparse
-import psutil
 from datetime import datetime
 # graph
 import pandas as pd
