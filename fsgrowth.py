@@ -6,39 +6,37 @@
 # - Writes to history file and compare delta
 # - Sends a report every time it's run with diff and delta
 #   
-# pip3 install psutil plotly pandas
+# pip3 install psutil pyplot pandas
 # 
 #------------------------------------------------------------------------------
 # Imports {{{
 import socket
 import shutil
+import io
 import os
 import pickle
 import argparse
 import psutil
 from datetime import datetime
-import smtplib
-from email.mime.multipart import MIMEMultipart
-from email.mime.text import MIMEText
-from email.mime.base import MIMEBase
+# graph
 import pandas as pd
-#import plotly.express as px
-#from plotly.offline import plot
 import matplotlib.pyplot as plt
-#import matplotlib.colormap as cm
-import seaborn as sns
-import io
-from email import encoders
+import matplotlib.dates as mdates
+import matplotlib.style as style
+from matplotlib import rcParams
+# mail
+import smtplib
 from email.message import EmailMessage
 from email.headerregistry import Address
 from email.utils import make_msgid
+from pretty_html_table import build_table
 
 # }}}
 # Config {{{
-fsfilter = ['/omd/data/archive*', '/app/omd/data']
+fs = '/omd/data/archive08'
 environment = 'SEB'
 hostname = socket.gethostname()
-historyfile = '/tmp/fsgrowth.db'
+historyfile = 'fsgrowth.db'
 
 # SMTP server
 smtphost = 'smtp.sebot.local'
@@ -49,126 +47,22 @@ smtprcvr = 'david.henden@addpro.se'
 # }}}
 # def main(): {{{
 #------------------------------------------------------------------------------
-def main(args):
+def main():
     """Load history, collect data, save history, send an e-mail report"""
 
     # Load history
     history = loadhistory(args.import_file)
 
     # Collect data
-    now = datetime.now()
-    fstotal = {}
-    for fs in psutil.disk_partitions():
+    present = collectdata()
 
-        fs = fs.mountpoint
-        [total, used, free] = map(lambda x: round(x / 1024 / 1024 / 1024),
-            shutil.disk_usage(fs))
+    # Append present to history
+    present['delta'] = present['used'] - history.used.iloc[-1]
+    data = history.reset_index().append(present, ignore_index=True)
+    data.set_index('date', inplace=True)
 
-        try:
-            if total == 0:
-                pct = 0
-            else:
-                pct = round((used / total) * 100)
-
-            # Add some deltas if we have a history
-            if fs in history:
-                used_delta = used - history[fs][2]
-                time_delta = now - history[fs][0]
-            else:
-                used_delta = 0
-                time_delta = now - now
-
-            # A complete fs row with metrics
-            fstotal[fs] = [now, total, used, free, pct, used_delta, time_delta]
-
-        except Exception as e:
-            print('{}: {}'.format(fs, e))
-
-#        print('{}/{}/{}/{}/{}/{}/{}/{}'.format(fs, now, total, used, free, pct, used_delta, time_delta))
-
-    # Print data
-#    history['Date'] = history.to_datetime(history['DateTime'])
-#    history['categories'] = pd.cut(df.index, bins, labels=group_names)
-
-#    history['Date'] = history['DateTime'].dt.date
-#    history = history[history['Free'].str.isnumeric()]
-#    history['Date'] = history['Date'].astype(np.datetime64)
-
-#    history.set_index('Date', inplace=True)
-
-#    for column in ('Total', 'Used', 'Pct'):
-#        del history[column]
-#    history.resample('D').size().plot.bar()
-
-#    print(history.index)
-#    print(history.columns)
-#    print(history.dtypes)
-
-#    # Trend
-#    from scipy import stats
-#    slope, intercept, r_value, p_value, std_err = stats.linregress(history.index, history['Free'])
-#    history['Line'] = slope * history.index + intercept
-#    ax1 = fig.add_subplot(1,1,1)
-
-#    sns.displot(data=history, x='Date', y='Free', shade=True)
-#    sns.displot(data=history, x='Date', y='Diff', shade=True)
-
-    # Matplotlib
-    history.set_index('date', inplace=True)
-
-    # Create some extra columns with rolling average, positive growth, status
-    history['7dayavg'] = history.free.rolling(7).mean().shift(-3)
-    history['positive'] = history['diff'] > 0
-    print(history)
-
-#    # Create a graph
-    plt.figure(figsize = (20,15))
-#
-#    ax1 = fig.add_subplot(2, 1, 1)
-#    ax2 = fig.add_subplot(2, 1, 2)
-#    history.plot(use_index=True, y='Free', kind='line', grid=True, linewidth=1, title='Free GB', color='r', drawstyle='steps-post', ylim=0, ax=ax1)
-#    history.plot(use_index=True, y='7DayAvg', kind='line', grid=True, linewidth=1, title='Free GB', color='y', ylim=0, ax=ax1)
-#    history.plot(use_index=True, y='Diff', kind='bar', grid=True, linewidth=1, title='Delta GB', ax=ax2, color=history.Positive.map({True: 'g', False: 'r'}))
-
-    # Overlay
-#    plt.rcParams['figure.figsize']=(20,15) # set the figure size
-#    plt.style.use('fivethirtyeight') # using the fivethirtyeight matplotlib theme
-#    fig, ax1 = plt.subplots()
-#    ax2 = ax1.twinx
-#    history.plot(use_index=True, y='free', kind='line', grid=True, title='Free GB', color='r', drawstyle='steps-post', ylim=0)
-#    history.plot(use_index=True, y='7dayavg', kind='line', grid=True, linewidth=1, title='Free GB', color='y', ylim=0)
-#    history.plot(use_index=True, y='diff', kind='bar', alpha=0.2, grid=False, title='Delta GB', color=history.positive.map({True: 'g', False: 'r'}), secondary_y=True)
-
-    # Seaborn
-    plt.clf()
-    fig, ax = plt.subplots()
-    sns.set()
-    sns.set_style("whitegrid")
-
-#    sns.set_style('fivethirtyeight')
-#    plt.title('Delta GB by day')
-#    ax.set_xticklabels(labels=history.index.date, rotation=45, ha='right')
-
-    sns.lineplot(x='date', y='free', ax=ax, data=history.reset_index(), marker='o', color='r')
-    ax2 = ax.twinx()
-    sns.lineplot(x='date', y='7dayavg', ax=ax2, data=history.reset_index(), marker='o', color='y')
-    sns.barplot(x='date', y='diff', ax=ax2, data=history.reset_index(), color='g')
-    #, color=history.positive.map({True: 'g', False: 'r'}))
-
-
-#    # Seaborn
-#    sns.lineplot(x='Date', y='Free', label='Daily', data=history, ci=None, marker='o')
-#    sns.lineplot(x='Date', y='7DayAvg', label='7 Day Avg', data=history, ci=None)
-#    sns.barplot(x='Date', y='Diff', label='Delta', data=history, ci=None)
-
-#    plt.xlabel('Date')
-#    plt.ylabel('Free GB')
-#    plt.ylim(0)
-
-    graph = io.BytesIO()
-    plt.savefig(graph, format='png')
-    graph.seek(0)
-    plt.clf()
+    # Generate a graph
+    graph = creategraph_pyplot(data)
 
     # Export
     if args.export_file:
@@ -178,22 +72,122 @@ def main(args):
         except Exception as e:
             print(e)
 
-    # Update history file (or not)
+    # Update history file - or not!
     if args.dont_update_history:
         if not args.quiet:
             print('Did not update history file')
     else:
-        # Write history and report to master
-        pickle.dump(history, open(historyfile, 'wb'))
+        # Write history pickle
+        pickle.dump(data, open(historyfile, 'wb'))
         print('Updated history file: {}'.format(historyfile))
+
+    # Fix the dataframe for reporting
+    # Reverse it and drop boring columns
+    data.reindex(index=data.index[::-1])
+    data.drop(columns=['fs', 'avg'], inplace=True)
     
     # Send report
-    sendreport(history.to_html(index=False, classes='data', border=1), graph.read())
+#    writereport(data, graph)
+    mailreport(data, graph)
 
     return None
 
 
 # }}}
+# def collectdata(): {{{
+#------------------------------------------------------------------------------
+def collectdata():
+    """Collect data from all file systems and return as an array"""
+
+    now = datetime.now()
+
+    try:
+        [total, used, free] = map(lambda x: int(round(x / 1024 / 1024 / 1024)),
+            shutil.disk_usage(fs)
+
+        # Get pct
+        if total == 0:
+            pct = 0
+        else:
+            pct = round((used / total) * 100)
+
+        fsvalues = {'date': now, 'fs': fs, 'total': total, 'used': used,
+            'free': free, 'pct': pct}
+    except Exception as e:
+        print('ERROR collecting filesystem data: {}'.format(e))
+        exit -1
+
+    print('Collected data for filesystem: {}'.format(fs))
+
+    return fsvalues
+
+
+# }}}
+#def creategraph_pyplot(data): {{{
+#------------------------------------------------------------------------------
+def creategraph_pyplot(data, fs):
+
+    data['avg'] = data.free.rolling(7).mean().shift(-3)
+    data['weekday'] = data.index.weekday
+    data['weekend'] = [True if value >=5 else False for value in data.weekday]
+
+    total_mean = round(data.delta.mean())
+    positive_mean = round(data.delta.where(data.delta.ge(0)).mean())
+
+    # Create the plots
+    fig, ax = plt.subplots(figsize=(12,4))
+    plt.gcf().subplots_adjust(bottom=0.20)
+    plt.title('Free GB by day: {}'.format(fs), fontsize=16)
+
+    # Free
+    plt.plot(mdates.date2num(list(data.index)), data.free, linewidth=3, color='#30a2da')
+#    # Rolling 7day average
+#    plt.plot(mdates.date2num(list(data.index)), data.avg, linewidth=3, color='#e5ae38')
+    # Delta change
+    plt.bar(mdates.date2num(list(data.index)), data.delta, alpha=.5,
+        align='center',
+        color=['#6d904f' if value >= 0 else '#fc4f30' for value in data.delta])
+
+    ax.grid(b=True, which='major', color='gray', linestyle='-', alpha=.3)
+    [ax.spines[x].set_visible(False) for x in ['top', 'right', 'bottom', 'left']]
+    style.use('fivethirtyeight')
+    ax.set_facecolor('#f0f0f0')
+    fig.set_edgecolor('#f0f0f0')
+
+    # Set the x axis
+    plt.xticks(rotation=25, fontsize=12)
+    ax.axhline(y = 0, color = 'black', linewidth = 1.3, alpha = .7)
+    ax.xaxis_date()
+    ax.xaxis.label.set_visible(False)
+    ax.xaxis.set_major_locator(mdates.DayLocator())
+    ax.xaxis.set_major_formatter(mdates.DateFormatter('%b %d'))
+    ax.set_xticks(ax.get_xticks()[1:-1])
+
+    # Set the y axis
+    plt.yticks(fontsize=12)
+    bottom = int(round(ax.get_yticks()[0]))
+    top = int(round(ax.get_yticks()[-1]))
+    ystep = int(round((top - bottom) / 10))
+    yrange = list(range(bottom, top, ystep))
+    ax.set_yticks(yrange[1:])
+    ax.set_ylabel('GB', fontsize=14)
+     
+    # Put a text box in upper right corner
+    props = dict(boxstyle='square', facecolor='wheat', alpha=.6, pad=.5)
+    ax.text(ax.get_xticks()[-1]-.5, top - 2 * ystep,
+        'Mean growth: {}\nPositive mean growth: {}'.
+        format(total_mean, positive_mean),
+        fontsize=14, va='center', ha='right', bbox=props)
+
+    # Save
+    graph = io.BytesIO()
+    plt.savefig(graph, format='png', dpi=72)
+    graph.seek(0)
+
+    return graph.read()
+
+
+#}}}
 # def loadhistory(importfile) {{{
 #------------------------------------------------------------------------------
 def loadhistory(importfile):
@@ -203,7 +197,7 @@ def loadhistory(importfile):
     # Import csv...
     if importfile:
         try:
-            history = pd.read_csv(importfile, parse_dates=[0])
+            history = pd.read_csv(importfile, parse_dates=['date'], index_col=['date'])
             if not args.quiet:
                 print('Imported csv file with {} data points: {}'
                     .format(len(history), importfile))
@@ -230,10 +224,50 @@ def loadhistory(importfile):
 
 
 # }}}
-# def sendmail(data): {{{
+# def writereport(data): {{{
 #------------------------------------------------------------------------------
-def sendreport(data, graph):
+def writereport(table, graph):
+
+    html_table = build_table(table.reset_index(), 'grey_light', font_size='small', font_family='Verdana')
+    html="""\
+<html>
+  <body>
+    <center>
+      <table width="100%" border="0" cellpadding="0" cellspacing="0" bgcolor="#FFFFFF">
+        <tr>
+          <td align="center" valign="top">
+            <div><p><img src="graph.png"></p></div>
+            <div><p>{table}</p></div>
+            <div><p>/fsgrowth e-mail reporter on {hostname}</p></div>
+          </td>
+        </tr>
+      </table>
+  </body>
+</html>
+""".format(hostname=hostname, table=html_table)
+
+    with open('graph.png', 'wb') as f:
+        f.write(graph)
+    f.close()
+
+    reportfile = 'report.html'
+    with open(reportfile, 'w') as f:
+        f.write(html)
+    f.close()
+
+    if not args.quiet:
+        print('Wrote report to disk: {}'.format(reportfile))
+
+    return None
+
+
+#}}}
+# def mailreport(data): {{{
+#------------------------------------------------------------------------------
+def mailreport(data, graph):
     """Build the e-mail report and send it"""
+
+    html_table = build_table(data.reset_index(), 'grey_light', font_size = 'small', font_family = 'Verdana')
 
     # Create an e-mail
     message = EmailMessage()
@@ -245,31 +279,42 @@ def sendreport(data, graph):
     # Attach a body and our image
     img_cid = make_msgid()
     message.add_alternative("""\
-<html>
-  <body>
-    <center>
-
-      <table width="100%" border="0" cellpadding="0" cellspacing="0" bgcolor="#FFFFFF">
-        <tr>
-          <td align="center" valign="top">
-            <div><p><img src="cid:{img_cid}"></p></div>
-            <div><p>{table}</p></div>
-            <div><p>/fsgrowth e-mail reporter on {hostname}</p></div>
-          </td>
-        </tr>
-      </table>
-  </body>
+<!DOCTYPE html PUBLIC "-//W3C//DTD XHTML 1.0 Transitional//EN" "http://www.w3.org/TR/xhtml1/DTD/xhtml1-transitional.dtd">
+<html xmlns="http://www.w3.org/1999/xhtml">
+    <head>
+        <meta http-equiv="Content-Type" content="text/html; charset=UTF-8" />
+        <title></title>
+        <style></style>
+    </head>
+    <body>
+        <table border="0" cellpadding="0" cellspacing="0" height="100%" width="100%" id="bodyTable">
+            <tr>
+                <td align="center" valign="top">
+                    <table border="0" cellpadding="20" cellspacing="0" width="600" id="emailContainer">
+                        <tr>
+                            <td align="center" valign="top">
+                                <tr><p><img src="cid:{img_cid}"></p></tr>
+                                <tr><p>{table}</p></tr>
+                            </td>
+                        </tr>
+                    </table>
+                </td>
+            </tr>
+        </table>
+    </body>
 </html>
-""".format(hostname=hostname, table=data, img_cid=img_cid[1:-1]), subtype='html')
+""".format(hostname=hostname, table=html_table, img_cid=img_cid[1:-1]), subtype='html')
     message.get_payload()[0].add_related(graph, 'image', 'png', cid=img_cid)
 
     # Send it
+    smtpserver = None
     try:
         smtpserver = smtplib.SMTP(smtphost, smtpport)
         smtpserver.ehlo()
         smtpserver.sendmail(smtpfrom, smtprcvr, message.as_string())
     except Exception as e:
-        print(e)
+
+        print('ERROR: Unable to send e-mail: {}'.format(e))
     finally:
         if smtpserver:
             smtpserver.close() 
@@ -291,6 +336,6 @@ if __name__ == '__main__':
     parser.add_argument('--dont-update-history', '-H', action='store_true', help='Don\'t update history file. Good for testing')
     parser.add_argument('--quiet', '-q', action='store_true', help='Be quiet. Dont print any output except for errors. Good for crontab')
     args = parser.parse_args()
-    main(args)
+    main()
 
 # }}}
