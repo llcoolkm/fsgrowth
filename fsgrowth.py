@@ -18,6 +18,7 @@ import pickle
 import argparse
 from datetime import datetime
 # graph
+import numpy as np
 import pandas as pd
 import matplotlib.pyplot as plt
 import matplotlib.dates as mdates
@@ -55,9 +56,15 @@ def main():
     # Collect data
     present = collectdata()
 
-    # Append present to history
-    present['delta'] = present['used'] - history.used.iloc[-1]
-    data = history.reset_index().append(present, ignore_index=True)
+    # Append present to history...
+    if 'used' in history:
+        present['delta'] = present['used'] - history.used.iloc[-1]
+        data = history.reset_index().append(present, ignore_index=True)
+    # ...or start from nothing
+    else:
+        present['delta'] = 0
+        data = pd.DataFrame([present])
+
     data.set_index('date', inplace=True)
 
     # Generate a graph
@@ -82,7 +89,8 @@ def main():
 
     # Fix the dataframe for reporting
     # Reverse it and drop boring columns
-    data.reindex(index=data.index[::-1])
+    data = data[::-1]
+#    data.reindex(index=data.index[::-1])
     data.drop(columns=['fs', 'avg'], inplace=True)
     
     # Send report
@@ -90,6 +98,43 @@ def main():
     mailreport(data, graph)
 
     return None
+
+
+# }}}
+# def loadhistory(importfile) {{{
+#------------------------------------------------------------------------------
+def loadhistory(importfile):
+    """Load history from pickle or csv"""
+    history = {}
+
+    # Import csv...
+    if importfile:
+        try:
+            history = pd.read_csv(importfile, parse_dates=['date'],
+                index_col=['date'])
+            if not args.quiet:
+                print('Imported csv file {} with {} data points'
+                    .format(importfile, len(history)))
+        except Exception as e:
+            print('Unable to import csv file: {}'.format(e))
+            exit(-1)
+
+    # ...or try to load a pickle
+    else:
+        if os.path.isfile(historyfile):
+            try:
+                history = pickle.load(open(historyfile, 'rb'))
+                if not args.quiet:
+                    print('Imported history file {} with {} data points'
+                        .format(historyfile, len(history)))
+            except Exception as e:
+                print('Unable to load history file: {}'.format(e))
+                exit(-1)
+        else:
+            if not args.quiet:
+                print('No history loaded')
+
+    return history
 
 
 # }}}
@@ -140,9 +185,11 @@ def creategraph_pyplot(data):
     plt.title('Free GB by day: {}'.format(fs), fontsize=16)
 
     # Free
-    plt.plot(mdates.date2num(list(data.index)), data.free, linewidth=3, color='#30a2da')
+    plt.plot(mdates.date2num(list(data.index)), data.free, linewidth=3,
+        color='#30a2da')
 #    # Rolling 7day average
-#    plt.plot(mdates.date2num(list(data.index)), data.avg, linewidth=3, color='#e5ae38')
+#    plt.plot(mdates.date2num(list(data.index)), data.avg, linewidth=3,
+#        color='#e5ae38')
     # Delta change
     plt.bar(mdates.date2num(list(data.index)), data.delta, alpha=.5,
         align='center',
@@ -171,13 +218,22 @@ def creategraph_pyplot(data):
     yrange = list(range(bottom, top, ystep))
     ax.set_yticks(yrange[1:])
     ax.set_ylabel('GB', fontsize=14)
-     
-    # Put a text box in upper right corner
-    props = dict(boxstyle='square', facecolor='wheat', alpha=.6, pad=.5)
-    ax.text(ax.get_xticks()[-1]-.5, top - 2 * ystep,
-        'Mean growth: {}\nPositive mean growth: {}'.
-        format(total_mean, positive_mean),
-        fontsize=14, va='center', ha='right', bbox=props)
+
+    # Is this a first run? Make a sad graph
+    if len(ax.get_xticks()) <= 1:
+        print('First run. A pretty poor graph will be generated')
+        plt.title('Tomorrow will bring you a better graph - promise!')
+        ax.yaxis.label.set_visible(False)
+        ax.set_yticks([])
+
+    # This doesnt work with 1 data point
+    else:
+        # Put a text box in upper right corner
+        props = dict(boxstyle='square', facecolor='wheat', alpha=.6, pad=.5)
+        ax.text(ax.get_xticks()[-1]-.5, top - 2 * ystep,
+            'Mean growth: {}\nPositive mean growth: {}'.
+            format(total_mean, positive_mean),
+            fontsize=14, va='center', ha='right', bbox=props)
 
     # Save
     graph = io.BytesIO()
@@ -188,47 +244,12 @@ def creategraph_pyplot(data):
 
 
 #}}}
-# def loadhistory(importfile) {{{
-#------------------------------------------------------------------------------
-def loadhistory(importfile):
-    """Load history from pickle or csv"""
-    history = {}
-
-    # Import csv...
-    if importfile:
-        try:
-            history = pd.read_csv(importfile, parse_dates=['date'], index_col=['date'])
-            if not args.quiet:
-                print('Imported csv file {} with {} data points'
-                    .format(importfile, len(history))
-        except Exception as e:
-            print('Unable to import csv file: {}'.format(e))
-            exit(-1)
-
-    # ...or try to load a pickle
-    else:
-        if os.path.isfile(historyfile):
-            try:
-                history = pickle.load(open(historyfile, 'rb'))
-                if not args.quiet:
-                    print('Imported history file {} with {} data points}'
-                        .format(historyfile, len(history)))
-            except Exception as e:
-                print('Unable to load history file: {}'.format(e))
-                exit(-1)
-        else:
-            if not args.quiet:
-                print('No history loaded')
-
-    return history
-
-
-# }}}
 # def writereport(data): {{{
 #------------------------------------------------------------------------------
 def writereport(table, graph):
 
-    html_table = build_table(table.reset_index(), 'grey_light', font_size='small', font_family='Verdana')
+    html_table = build_table(table.reset_index(), 'grey_light',
+        font_size='small', font_family='Verdana')
     html="""\
 <html>
   <body>
@@ -267,7 +288,8 @@ def writereport(table, graph):
 def mailreport(data, graph):
     """Build the e-mail report and send it"""
 
-    html_table = build_table(data.reset_index(), 'grey_light', font_size = 'small', font_family = 'Verdana')
+    html_table = build_table(data.reset_index(), 'grey_light',
+        font_size = 'small', font_family = 'Verdana')
 
     # Create an e-mail
     message = EmailMessage()
@@ -303,7 +325,8 @@ def mailreport(data, graph):
         </table>
     </body>
 </html>
-""".format(hostname=hostname, table=html_table, img_cid=img_cid[1:-1]), subtype='html')
+""".format(hostname=hostname, table=html_table, img_cid=img_cid[1:-1]),
+        subtype='html')
     message.get_payload()[0].add_related(graph, 'image', 'png', cid=img_cid)
 
     # Send it
