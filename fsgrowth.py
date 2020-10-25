@@ -63,7 +63,12 @@ def main():
             present['delta'] = 0
             data = pd.DataFrame([present])
 
-    data.set_index('date', inplace=True)
+    if isinstance(data, pd.DataFrame):
+        data.set_index('date', inplace=True)
+    else:
+        print('ERROR: Have neither history nor new data to work with.'
+            'Please provide at least one')
+        exit(-1)
 
     # Generate a graph
     graph = creategraph_pyplot(data, args.filesystem)
@@ -117,7 +122,7 @@ def loadhistory(history_file):
             exit(-1)
     else:
         if not args.quiet:
-            print('Those who don\'t know history are doomed to repeat it.')
+            print('Did not load history file {}'.format(history_file))
 
     return history
 
