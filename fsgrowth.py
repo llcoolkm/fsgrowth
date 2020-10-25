@@ -14,11 +14,9 @@ import socket
 import shutil
 import io
 import os
-import pickle
 import argparse
 from datetime import datetime
 # graph
-import numpy as np
 import pandas as pd
 import matplotlib.pyplot as plt
 import matplotlib.dates as mdates
@@ -33,10 +31,7 @@ from pretty_html_table import build_table
 
 # }}}
 # Config {{{
-fs = '/omd/data/archive08'
-environment = 'SEB'
 hostname = socket.gethostname()
-historyfile = '/tmp/fsgrowth.db'
 
 # SMTP server
 smtphost = 'smtp.sebot.local'
@@ -51,88 +46,78 @@ def main():
     """Load history, collect data, save history, send an e-mail report"""
 
     # Load history
-    history = loadhistory(args.import_file)
+    data = loadhistory(args.history_file)
 
     # Collect data
-    present = collectdata()
-
-    # Append present to history...
-    if 'used' in history:
-        present['delta'] = present['used'] - history.used.iloc[-1]
-        data = history.reset_index().append(present, ignore_index=True)
-    # ...or start from nothing
+    if args.dont_collect_data:
+        print('Did not collect new data')
     else:
-        present['delta'] = 0
-        data = pd.DataFrame([present])
+        present = collectdata(args.filesystem)
+
+        # Append present to history...
+        if 'used' in data:
+            present['delta'] = present['used'] - data.used.iloc[-1]
+            data = data.append(present, ignore_index=True)
+        # ...or start fresh
+        else:
+            present['delta'] = 0
+            data = pd.DataFrame([present])
 
     data.set_index('date', inplace=True)
 
     # Generate a graph
-    graph = creategraph_pyplot(data)
+    graph = creategraph_pyplot(data, args.filesystem)
 
     # Update history file - or not!
-    if args.dont_update_history:
+    if args.dont_collect_data:
         if not args.quiet:
             print('Did not update history file')
     else:
-        # Write history pickle
-        pickle.dump(data, open(historyfile, 'wb'))
-        print('Updated history file: {}'.format(historyfile))
-
-    # Export
-    if args.export_file:
         try:
-            history.to_csv(args.export_file)
-            print('Wrote export csv file: {}'.format(args.export_file))
+            data.to_csv(args.history_file)
+            print('Updated history file: {}'.format(args.history_file))
         except Exception as e:
-            print(e)
+            print('ERROR: Unable to update history file {}: {}'
+                .format(args.history_file, e))
+            exit(-1)
 
-    # Fix the dataframe for reporting
-    # Reverse it and drop boring columns
-    data = data[::-1]
-#    data.reindex(index=data.index[::-1])
-    data.drop(columns=['fs', 'avg'], inplace=True)
+    # Send mail report - or not!
+    if args.dont_send_report:
+        if not args.quiet:
+            print('Not sending report')
+    else:
+        # Fix the dataframe for reporting
+        # Reverse it and drop boring columns
+        data = data[::-1]
+        data.drop(columns=['fs', 'avg'], inplace=True)
     
-    # Send report
-#    writereport(data, graph)
-    mailreport(data, graph)
+        # Send report
+        #writereport(data, fs, graph)
+        mailreport(data, graph, args.filesystem, args.marker)
 
     return None
 
 
 # }}}
-# def loadhistory(importfile) {{{
+# def loadhistory(history_file) {{{
 #------------------------------------------------------------------------------
-def loadhistory(importfile):
+def loadhistory(history_file):
     """Load history from pickle or csv"""
     history = {}
 
-    # Import csv...
-    if importfile:
+    if os.path.isfile(history_file):
         try:
-            history = pd.read_csv(importfile, parse_dates=['date'],
-                index_col=['date'])
+            history = pd.read_csv(history_file, parse_dates=['date'])
             if not args.quiet:
-                print('Imported csv file {} with {} data points'
-                    .format(importfile, len(history)))
+                print('Loaded history file {} with {} data points'
+                    .format(history_file, len(history)))
         except Exception as e:
-            print('Unable to import csv file: {}'.format(e))
+            print('ERROR: Unable to load history file {}: {}'
+                .format(history_file, e))
             exit(-1)
-
-    # ...or try to load a pickle
     else:
-        if os.path.isfile(historyfile):
-            try:
-                history = pickle.load(open(historyfile, 'rb'))
-                if not args.quiet:
-                    print('Imported history file {} with {} data points'
-                        .format(historyfile, len(history)))
-            except Exception as e:
-                print('Unable to load history file: {}'.format(e))
-                exit(-1)
-        else:
-            if not args.quiet:
-                print('No history loaded')
+        if not args.quiet:
+            print('Those who don\'t know history are doomed to repeat it.')
 
     return history
 
@@ -140,7 +125,7 @@ def loadhistory(importfile):
 # }}}
 # def collectdata(): {{{
 #------------------------------------------------------------------------------
-def collectdata():
+def collectdata(fs):
     """Collect data from all file systems and return as an array"""
 
     now = datetime.now().replace(microsecond=0)
@@ -169,7 +154,7 @@ def collectdata():
 # }}}
 #def creategraph_pyplot(data): {{{
 #------------------------------------------------------------------------------
-def creategraph_pyplot(data):
+def creategraph_pyplot(data, fs):
     """Plot a beautiful graph and return a png in a string"""
 
     data['avg'] = data.free.rolling(7).mean().shift(-3)
@@ -283,9 +268,9 @@ def writereport(table, graph):
 
 
 #}}}
-# def mailreport(data): {{{
+# def mailreport(data, graph, fs, marker): {{{
 #------------------------------------------------------------------------------
-def mailreport(data, graph):
+def mailreport(data, graph, fs, marker):
     """Build the e-mail report and send it"""
 
     html_table = build_table(data.reset_index(), 'grey_light',
@@ -295,8 +280,8 @@ def mailreport(data, graph):
     message = EmailMessage()
     message['From'] = Address(smtpfrom)
     message['To'] =  Address(smtprcvr)
-    message['Subject'] = '{}: File system report from {}'.format(environment,
-        hostname)
+    message['Subject'] = '{}: File system {}:{} has {}GB free'.format(marker,
+        hostname, fs, data['free'].iloc[0])
 
     # Attach a body and our image
     img_cid = make_msgid()
@@ -336,8 +321,8 @@ def mailreport(data, graph):
         smtpserver.ehlo()
         smtpserver.sendmail(smtpfrom, smtprcvr, message.as_string())
     except Exception as e:
-
         print('ERROR: Unable to send e-mail: {}'.format(e))
+        exit(-1)
     finally:
         if smtpserver:
             smtpserver.close() 
@@ -353,12 +338,15 @@ if __name__ == '__main__':
     """Parse arguments and call main"""
 
     parser = argparse.ArgumentParser(description='fsgrowth')
-    parser.add_argument('--days', '-d', type=int, default=7, help='Number of days to include in report')
-    parser.add_argument('--export-file', '-e', type=str, help='Export data to this csv file instead of collecting new data and reporting')
-    parser.add_argument('--import-file', '-i', type=str, help='Import historical data from this csv file instead of default')
-    parser.add_argument('--dont-update-history', '-H', action='store_true', help='Don\'t update history file. Good for testing')
-    parser.add_argument('--quiet', '-q', action='store_true', help='Be quiet. Dont print any output except for errors. Good for crontab')
+    parser.add_argument('--days', '-d', type=int, default=7, help='Number of days to include in report counting backwards from today')
+    parser.add_argument('--dont-collect-data', action='store_true', help='Don\'t collect new data. Good for testing')
+    parser.add_argument('--dont-send-report', action='store_true', help='Don\'t e-mail the report, just update history file')
+    parser.add_argument('--filesystem', '-f', type=str, required=True, help='Filesystem to report on. Required')
+    parser.add_argument('--history-file', '-H', type=str, required=True, help='History file to use. Required')
+    parser.add_argument('--marker', '-m', type=str, help='Put this string as a marker in the beginning of the e-mail report subject. Good for filtering')
+    parser.add_argument('--quiet', '-q', action='store_true', help='Be quiet. Dont print any output except for errors. Great for crontab')
     args = parser.parse_args()
     main()
+
 
 # }}}
