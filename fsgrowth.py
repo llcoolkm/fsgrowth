@@ -50,7 +50,8 @@ def main():
 
     # Collect data
     if args.dont_collect_data:
-        print('Did not collect new data')
+        if not args.quiet:
+            print('Did not collect new data')
     else:
         present = collectdata(args.filesystem)
 
@@ -80,7 +81,8 @@ def main():
     else:
         try:
             data.to_csv(args.history_file)
-            print('Updated history file: {}'.format(args.history_file))
+            if not args.quiet:
+                print('Updated history file: {}'.format(args.history_file))
         except Exception as e:
             print('ERROR: Unable to update history file {}: {}'
                 .format(args.history_file, e))
@@ -148,10 +150,11 @@ def collectdata(fs):
         fsvalues = {'date': now, 'fs': fs, 'total': total, 'used': used,
             'free': free, 'pct': pct}
     except Exception as e:
-        print('ERROR collecting filesystem data: {}'.format(e))
+        print('ERROR: collecting filesystem data: {}'.format(e))
         exit(-1)
 
-    print('Collected data for filesystem: {}'.format(fs))
+    if not args.quiet:
+        print('Collected data for filesystem: {}'.format(fs))
 
     return fsvalues
 
@@ -331,7 +334,8 @@ def mailreport(data, graph, fs, marker):
     finally:
         if smtpserver:
             smtpserver.close() 
-            print('e-mail sent to {}'.format(smtprcvr))
+            if not args.quiet:
+                print('e-mail sent to {}'.format(smtprcvr))
 
     return None
 
