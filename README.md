@@ -11,7 +11,7 @@ python3 -m pip install --upgrade pandas matplotlib pretty_htnml_table
 
 ## How to run
 
-Edit the script and change the email parameters. Run once every day, either in the morning or the evening. Run it once to see that it works
+Edit the script and change the email parameters. You should run it once per day to collect stats. Report can be sent at the same time or scheduled separately, for example in the morning or weekly. Run it once manually first to see that everything works.
 
 ```
 ./fsgrowth.py
@@ -19,7 +19,9 @@ Edit the script and change the email parameters. Run once every day, either in t
 
 Install it into crontab:
 ```
-echo '00 09 * * * root /opt/scripts/fsgrowth/fsgrowth.py --filesystem /tmp --history-file=/tmp/fsgrowth.csv' > /etc/cron.d/fsgrowth
+echo '00 23 * * * root /opt/scripts/fsgrowth/fsgrowth.py -f /home -H /tmp/fsgrowth.csv --update' > /etc/cron.d/fsgrowth
+echo '00 08 * * * root /opt/scripts/fsgrowth/fsgrowth.py -f /home -H /tmp/fsgrowth.csv --report' >> /etc/cron.d/fsgrowth
+
 ```
 
 If everything works add --quiet. The first day will contain an empty graph and also a 0 delta change.

@@ -48,11 +48,8 @@ def main():
     # Load history
     data = loadhistory(args.history_file)
 
-    # Collect data
-    if args.dont_collect_data:
-        if not args.quiet:
-            print('Did not collect new data')
-    else:
+    # Collect new data
+    if args.update:
         present = collectdata(args.filesystem)
 
         # Append present to history...
@@ -63,7 +60,11 @@ def main():
         else:
             present['delta'] = 0
             data = pd.DataFrame([present])
+    else:
+        if not args.quiet:
+            print('Did not collect new data')
 
+    # Do we have a dataframe to play with?
     if isinstance(data, pd.DataFrame):
         data.set_index('date', inplace=True)
     else:
@@ -71,14 +72,21 @@ def main():
             'Please provide at least one')
         exit(-1)
 
-    # Generate a graph
-    graph = creategraph_pyplot(data, args.filesystem)
+    # Normalize datetime
+    data.index = data.index.normalize()
 
-    # Update history file - or not!
-    if args.dont_collect_data:
-        if not args.quiet:
-            print('Did not update history file')
-    else:
+    # Calculate some columns
+    data['avg'] = data.free.rolling(7).mean().shift(-3)
+    data['weekday'] = data.index.weekday
+    data['weekend'] = [True if value >=5 else False for value in data.weekday]
+
+    # Calulcate delta means
+    mean = {}
+    mean['total'] = round(data.delta.mean())
+    mean['positive']= round(data.delta.where(data.delta.ge(0)).mean())
+
+    # Update history file...
+    if args.update:
         try:
             data.to_csv(args.history_file)
             if not args.quiet:
@@ -87,20 +95,31 @@ def main():
             print('ERROR: Unable to update history file {}: {}'
                 .format(args.history_file, e))
             exit(-1)
-
-    # Send mail report - or not!
-    if args.dont_send_report:
-        if not args.quiet:
-            print('Not sending report')
+    # ...or not!
     else:
-        # Fix the dataframe for reporting
-        # Reverse it and drop boring columns
+        if not args.quiet:
+            print('Did not update history file')
+
+    # Generate a report and send it...
+    if args.report:
+
+        # Generate a graph (but first set sample time to noon)
+        data.index = data.index + pd.DateOffset(hours=12)
+        graph = creategraph_pyplot(data, mean, args.filesystem)
+
+        # Fix the dataframe for reporting: normalize it, reverse it and drop
+        # superfluous columns
+        data.index = data.index.normalize()
         data = data[::-1]
         data.drop(columns=['fs', 'avg'], inplace=True)
     
         # Send report
         #writereport(data, fs, graph)
         mailreport(data, graph, args.filesystem, args.marker)
+    # ...or not!
+    else:
+        if not args.quiet:
+            print('Did not send a report')
 
     return None
 
@@ -116,8 +135,12 @@ def loadhistory(history_file):
         try:
             history = pd.read_csv(history_file, parse_dates=['date'])
             if not args.quiet:
-                print('Loaded history file {} with {} data points'
-                    .format(history_file, len(history)))
+                begin = history['date'].iloc[0]
+                end = history['date'].iloc[-1]
+
+                print('Loaded history file {} with {} data points from'
+                    ' {} to {}'
+                    .format(history_file, len(history), begin, end))
         except Exception as e:
             print('ERROR: Unable to load history file {}: {}'
                 .format(history_file, e))
@@ -162,15 +185,18 @@ def collectdata(fs):
 # }}}
 #def creategraph_pyplot(data): {{{
 #------------------------------------------------------------------------------
-def creategraph_pyplot(data, fs):
+def creategraph_pyplot(data, mean, fs):
     """Plot a beautiful graph and return a png in a string"""
 
-    data['avg'] = data.free.rolling(7).mean().shift(-3)
-    data['weekday'] = data.index.weekday
-    data['weekend'] = [True if value >=5 else False for value in data.weekday]
-
-    total_mean = round(data.delta.mean())
-    positive_mean = round(data.delta.where(data.delta.ge(0)).mean())
+    # fivethirtyeight palette
+    palette = {
+        'blue': '#30a2da',
+        'red': '#fc4f30',
+        'yellow': '#e5ae38',
+        'green': '#6d904f',
+        'gray': '#8b8b8b',
+        'bg': '#f0f0f0'
+    }
 
     # Create the plots
     fig, ax = plt.subplots(figsize=(12,4))
@@ -179,20 +205,21 @@ def creategraph_pyplot(data, fs):
 
     # Free
     plt.plot(mdates.date2num(list(data.index)), data.free, linewidth=3,
-        color='#30a2da')
+        color=palette['blue'])
 #    # Rolling 7day average
 #    plt.plot(mdates.date2num(list(data.index)), data.avg, linewidth=3,
-#        color='#e5ae38')
+#        color=palette['yellow'])
     # Delta change
     plt.bar(mdates.date2num(list(data.index)), data.delta, alpha=.5,
         align='center',
-        color=['#6d904f' if value >= 0 else '#fc4f30' for value in data.delta])
+        color=[palette['green'] if value >= 0 \
+            else palette['red'] for value in data.delta])
 
     ax.grid(b=True, which='major', color='gray', linestyle='-', alpha=.3)
     [ax.spines[x].set_visible(False) for x in ['top', 'right', 'bottom', 'left']]
     style.use('fivethirtyeight')
-    ax.set_facecolor('#f0f0f0')
-    fig.set_edgecolor('#f0f0f0')
+    ax.set_facecolor(palette['bg'])
+    fig.set_edgecolor(palette['bg'])
 
     # Set the x axis
     plt.xticks(rotation=25, fontsize=12)
@@ -214,24 +241,25 @@ def creategraph_pyplot(data, fs):
 
     # Is this a first run? Make a sad graph
     if len(ax.get_xticks()) <= 1:
-        print('First run. A pretty poor graph will be generated')
+        print('First run. A pretty sad graph will be generated')
         plt.title('Tomorrow will bring you a better graph - promise!')
         ax.yaxis.label.set_visible(False)
         ax.set_yticks([])
 
-    # This doesnt work with 1 data point
+    # This doesnt work with less than 2 data points
     else:
         # Put a text box in upper right corner
         props = dict(boxstyle='square', facecolor='wheat', alpha=.6, pad=.5)
         ax.text(ax.get_xticks()[-1]-.5, top - 2 * ystep,
             'Mean growth: {}\nPositive mean growth: {}'.
-            format(total_mean, positive_mean),
+            format(mean['total'], mean['positive']),
             fontsize=14, va='center', ha='right', bbox=props)
 
     # Save
     graph = io.BytesIO()
     plt.savefig(graph, format='png', dpi=72)
     graph.seek(0)
+    print('Created a beautiful graph')
 
     return graph.read()
 
@@ -347,13 +375,13 @@ if __name__ == '__main__':
     """Parse arguments and call main"""
 
     parser = argparse.ArgumentParser(description='fsgrowth')
-    parser.add_argument('--days', '-d', type=int, default=7, help='Number of days to include in report counting backwards from today')
-    parser.add_argument('--dont-collect-data', action='store_true', help='Don\'t collect new data. Good for testing')
-    parser.add_argument('--dont-send-report', action='store_true', help='Don\'t e-mail the report, just update history file')
+    parser.add_argument('--days', '-d', type=int, default=7, help='Number of days to include in report counting backwards from today. NOT IMPLEMENTED YET!')
     parser.add_argument('--filesystem', '-f', type=str, required=True, help='Filesystem to report on. Required')
     parser.add_argument('--history-file', '-H', type=str, required=True, help='History file to use. Required')
     parser.add_argument('--marker', '-m', type=str, help='Put this string as a marker in the beginning of the e-mail report subject. Good for filtering')
     parser.add_argument('--quiet', '-q', action='store_true', help='Be quiet. Dont print any output except for errors. Great for crontab')
+    parser.add_argument('--report', '-r', action='store_true', help='Create and e-mail a report')
+    parser.add_argument('--update', '-u', action='store_true', help='Collect new data and update the history file')
     args = parser.parse_args()
     main()
 
