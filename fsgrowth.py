@@ -80,7 +80,6 @@ def main():
     for date in data.index[data['total'].isnull()]:
         print('WARNING: Missing date {}'
             .format(date.to_pydatetime().date().isoformat()))
-    print(data)
 
     # Calculate some columns
     data['avg'] = data.free.rolling(7).mean().shift(-3)
