@@ -15,6 +15,7 @@ import shutil
 import io
 import os
 import argparse
+import math
 from datetime import datetime
 # graph
 import pandas as pd
@@ -67,6 +68,11 @@ def main():
     # Do we have a dataframe to play with?
     if isinstance(data, pd.DataFrame):
         data.set_index('date', inplace=True)
+        # Check for missing dates in data
+        data = data.asfreq('D')
+        for date in data.index[data['total'].isnull()]:
+            print('WARNING: Missing date {}'
+                .format(date.to_pydatetime().date().isoformat()))
     else:
         print('ERROR: Have neither history nor new data to work with.'
             'Please provide at least one')
@@ -80,10 +86,11 @@ def main():
     data['weekday'] = data.index.weekday
     data['weekend'] = [True if value >=5 else False for value in data.weekday]
 
-    # Calulcate delta means
+    # Calulcate delta means and out-of-space days
     mean = {}
     mean['total'] = round(data.delta.mean())
-    mean['positive']= round(data.delta.where(data.delta.ge(0)).mean())
+    mean['positive'] = round(data.delta.where(data.delta.ge(0)).mean())
+    mean['days'] = math.floor(data['free'].iloc[-1] / mean['positive'])
 
     # Update history file...
     if args.update:
@@ -115,7 +122,7 @@ def main():
     
         # Send report
         #writereport(data, fs, graph)
-        mailreport(data, graph, args.filesystem, args.marker)
+        mailreport(data, graph, args.filesystem, mean, args.marker)
     # ...or not!
     else:
         if not args.quiet:
@@ -251,15 +258,16 @@ def creategraph_pyplot(data, mean, fs):
         # Put a text box in upper right corner
         props = dict(boxstyle='square', facecolor='wheat', alpha=.6, pad=.5)
         ax.text(ax.get_xticks()[-1]-.5, top - 2 * ystep,
-            'Mean growth: {}\nPositive mean growth: {}'.
-            format(mean['total'], mean['positive']),
+            'Mean growth: {}\nPositive mean growth: {}\nOut of space in {} days'.
+            format(mean['total'], mean['positive'], mean['days']),
             fontsize=14, va='center', ha='right', bbox=props)
 
     # Save
     graph = io.BytesIO()
     plt.savefig(graph, format='png', dpi=72)
     graph.seek(0)
-    print('Created a beautiful graph')
+    if not args.quiet:
+        print('Created a beautiful graph')
 
     return graph.read()
 
@@ -304,9 +312,9 @@ def writereport(table, graph):
 
 
 #}}}
-# def mailreport(data, graph, fs, marker): {{{
+# def mailreport(data, graph, fs, mean, marker): {{{
 #------------------------------------------------------------------------------
-def mailreport(data, graph, fs, marker):
+def mailreport(data, graph, fs, mean, marker):
     """Build the e-mail report and send it"""
 
     html_table = build_table(data.reset_index(), 'grey_light',
@@ -316,8 +324,8 @@ def mailreport(data, graph, fs, marker):
     message = EmailMessage()
     message['From'] = Address(smtpfrom)
     message['To'] =  Address(smtprcvr)
-    message['Subject'] = '{}: File system {}:{} has {}GB free'.format(marker,
-        hostname, fs, data['free'].iloc[0])
+    message['Subject'] = '{}: File system {}:{} has {}GB free ({} days)'.format(marker,
+        hostname, fs, data['free'].iloc[0], mean['days'])
 
     # Attach a body and our image
     img_cid = make_msgid()
