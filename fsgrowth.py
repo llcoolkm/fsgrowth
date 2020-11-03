@@ -65,21 +65,22 @@ def main():
         if not args.quiet:
             print('Did not collect new data')
 
-    # Do we have a dataframe to play with?
-    if isinstance(data, pd.DataFrame):
-        data.set_index('date', inplace=True)
-        # Check for missing dates in data
-        data = data.asfreq('D')
-        for date in data.index[data['total'].isnull()]:
-            print('WARNING: Missing date {}'
-                .format(date.to_pydatetime().date().isoformat()))
-    else:
+    # Die if we don't have a dataframe to play with
+    if not isinstance(data, pd.DataFrame):
         print('ERROR: Have neither history nor new data to work with.'
             'Please provide at least one')
         exit(-1)
 
-    # Normalize datetime
+    # Set index and normalize datetime
+    data.set_index('date', inplace=True)
     data.index = data.index.normalize()
+
+    # Warn if missing dates in data
+    data = data.asfreq('D')
+    for date in data.index[data['total'].isnull()]:
+        print('WARNING: Missing date {}'
+            .format(date.to_pydatetime().date().isoformat()))
+    print(data)
 
     # Calculate some columns
     data['avg'] = data.free.rolling(7).mean().shift(-3)
@@ -90,7 +91,10 @@ def main():
     mean = {}
     mean['total'] = round(data.delta.mean())
     mean['positive'] = round(data.delta.where(data.delta.ge(0)).mean())
-    mean['days'] = math.floor(data['free'].iloc[-1] / mean['positive'])
+    if mean['positive'] > 0:
+        mean['days'] = math.floor(data['free'].iloc[-1] / mean['positive'])
+    else:
+        mean['days'] = 'infinite'
 
     # Update history file...
     if args.update:
@@ -110,8 +114,7 @@ def main():
     # Generate a report and send it...
     if args.report:
 
-        # Generate a graph (but first set sample time to noon)
-        data.index = data.index + pd.DateOffset(hours=12)
+        # Generate a graph
         graph = creategraph_pyplot(data, mean, args.filesystem)
 
         # Fix the dataframe for reporting: normalize it, reverse it and drop
@@ -208,7 +211,7 @@ def creategraph_pyplot(data, mean, fs):
     # Create the plots
     fig, ax = plt.subplots(figsize=(12,4))
     plt.gcf().subplots_adjust(bottom=0.20)
-    plt.title('Free GB by day: {}'.format(fs), fontsize=16)
+    plt.title('Free GB by day - {}:{}'.format(hostname, fs), fontsize=16)
 
     # Free
     plt.plot(mdates.date2num(list(data.index)), data.free, linewidth=3,
@@ -229,13 +232,14 @@ def creategraph_pyplot(data, mean, fs):
     fig.set_edgecolor(palette['bg'])
 
     # Set the x axis
-    plt.xticks(rotation=25, fontsize=12)
+    plt.xticks(rotation=90, fontsize=12)
     ax.axhline(y = 0, color = 'black', linewidth = 1.3, alpha = .7)
     ax.xaxis_date()
     ax.xaxis.label.set_visible(False)
     ax.xaxis.set_major_locator(mdates.DayLocator())
     ax.xaxis.set_major_formatter(mdates.DateFormatter('%b %d'))
-    ax.set_xticks(ax.get_xticks()[1:-1])
+    ax.set_xticks(ax.get_xticks())
+    #ax.set_xticks(ax.get_xticks()[1:-1])
 
     # Set the y axis
     plt.yticks(fontsize=12)
@@ -246,21 +250,24 @@ def creategraph_pyplot(data, mean, fs):
     ax.set_yticks(yrange[1:])
     ax.set_ylabel('GB', fontsize=14)
 
-    # Is this a first run? Make a sad graph
+    # Is this a first run? Make a sad empty graph with a promise
     if len(ax.get_xticks()) <= 1:
-        print('First run. A pretty sad graph will be generated')
+        print('Only one data point. A pretty sad graph will be generated')
         plt.title('Tomorrow will bring you a better graph - promise!')
+        ax.xaxis.label.set_visible(False)
         ax.yaxis.label.set_visible(False)
         ax.set_yticks([])
+        ax.set_xticks([])
 
     # This doesnt work with less than 2 data points
     else:
-        # Put a text box in upper right corner
+        # Put a text box in upper right corner with some stats
         props = dict(boxstyle='square', facecolor='wheat', alpha=.6, pad=.5)
-        ax.text(ax.get_xticks()[-1]-.5, top - 2 * ystep,
-            'Mean growth: {}\nPositive mean growth: {}\nOut of space in {} days'.
-            format(mean['total'], mean['positive'], mean['days']),
-            fontsize=14, va='center', ha='right', bbox=props)
+        ax.text(.9, .8, 'Mean growth: {}\nPositive mean growth: {}\nOut of'\
+            ' space in {} days'.format(mean['total'], mean['positive'],
+                mean['days']),
+            transform=ax.transAxes, fontsize=14, va='center', ha='center',
+            bbox=props)
 
     # Save
     graph = io.BytesIO()
