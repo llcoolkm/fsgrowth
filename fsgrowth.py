@@ -16,7 +16,7 @@ import io
 import os
 import argparse
 import math
-from datetime import datetime
+from datetime import datetime, timedelta
 # graph
 import pandas as pd
 import matplotlib.pyplot as plt
@@ -112,6 +112,10 @@ def main():
 
     # Generate a report and send it...
     if args.report:
+
+        # Dont graph more than thirty days ago
+        thirtydaysago = datetime.now() - timedelta(30)
+        data = data.truncate(before=thirtydaysago, copy=False)
 
         # Generate a graph
         graph = creategraph_pyplot(data, mean, args.filesystem)
