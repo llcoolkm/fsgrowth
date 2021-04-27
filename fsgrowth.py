@@ -86,15 +86,6 @@ def main():
     data['weekday'] = data.index.weekday
     data['weekend'] = [True if value >=5 else False for value in data.weekday]
 
-    # Calulcate delta means and out-of-space days
-    mean = {}
-    mean['total'] = round(data.delta.mean())
-    mean['positive'] = round(data.delta.where(data.delta.ge(0)).mean())
-    if mean['positive'] > 0:
-        mean['days'] = math.floor(data['free'].iloc[-1] / mean['positive'])
-    else:
-        mean['days'] = 'infinite'
-
     # Update history file...
     if args.update:
         try:
@@ -110,12 +101,22 @@ def main():
         if not args.quiet:
             print('Did not update history file')
 
+    # Since we have now saved history we are free to truncate our work sample
+    # to the requested reporting period
+    thirtydaysago = datetime.now() - timedelta(args.days)
+    data = data.truncate(before=thirtydaysago, copy=False)
+
+    # Calulcate delta means and out-of-space days
+    mean = {}
+    mean['total'] = round(data.delta.mean())
+    mean['positive'] = round(data.delta.where(data.delta.ge(0)).mean())
+    if mean['positive'] > 0:
+        mean['days'] = math.floor(data['free'].iloc[-1] / mean['positive'])
+    else:
+        mean['days'] = 'infinite'
+
     # Generate a report and send it...
     if args.report:
-
-        # Dont graph more than thirty days ago
-        thirtydaysago = datetime.now() - timedelta(30)
-        data = data.truncate(before=thirtydaysago, copy=False)
 
         # Generate a graph
         graph = creategraph_pyplot(data, mean, args.filesystem)
@@ -393,7 +394,7 @@ if __name__ == '__main__':
     """Parse arguments and call main"""
 
     parser = argparse.ArgumentParser(description='fsgrowth')
-    parser.add_argument('--days', '-d', type=int, default=7, help='Number of days to include in report counting backwards from today. NOT IMPLEMENTED YET!')
+    parser.add_argument('--days', '-d', type=int, default=30, help='Number of days to report on counting backwards from today. Default 30')
     parser.add_argument('--filesystem', '-f', type=str, required=True, help='Filesystem to report on. Required')
     parser.add_argument('--history-file', '-H', type=str, required=True, help='History file to use. Required')
     parser.add_argument('--marker', '-m', type=str, help='Put this string as a marker in the beginning of the e-mail report subject. Good for filtering')
