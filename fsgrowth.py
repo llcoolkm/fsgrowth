@@ -252,7 +252,17 @@ def creategraph_pyplot(data, mean, fs):
     ystep = int(round((top - bottom) / 10))
     yrange = list(range(bottom, top, ystep))
     ax.set_yticks(yrange[1:])
-    ax.set_ylabel('GB', fontsize=14)
+    ax.set_ylabel('Free GB', fontsize=14)
+
+    # Create second y axis for delta
+    ax2 = ax.twinx()
+    bottom2 = int(round(ax2.get_yticks()[0]))
+    top2 = int(round(ax2.get_yticks()[-1]))
+    ystep2 = int(round((top2 - bottom2) / 10))
+    yrange2 = list(range(bottom2, top2, ystep2))
+    ax2.set_ylabel('Delta GB', fontsize=14)
+
+    # data.delta,
 
     # Is this a first run? Make a sad empty graph with a promise
     if len(ax.get_xticks()) <= 1:
@@ -267,7 +277,7 @@ def creategraph_pyplot(data, mean, fs):
     else:
         # Put a text box in upper right corner with some stats
         props = dict(boxstyle='square', facecolor='wheat', alpha=.6, pad=.5)
-        ax.text(.9, .8, 'Mean growth: {}\nPositive mean growth: {}\nOut of'\
+        ax.text(.5, .8, 'Mean growth: {}\nPositive mean growth: {}\nOut of'\
             ' space in {} days'.format(mean['total'], mean['positive'],
                 mean['days']),
             transform=ax.transAxes, fontsize=14, va='center', ha='center',
