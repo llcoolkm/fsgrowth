@@ -6,7 +6,7 @@ File system growth reporter with deltas
 Install python modules
 
 ```
-python3 -m pip install --upgrade pandas matplotlib pretty_htnml_table
+python3 -m pip install --upgrade pandas matplotlib pretty-htnml-table
 ```
 
 ## How to run
