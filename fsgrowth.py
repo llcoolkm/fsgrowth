@@ -56,7 +56,7 @@ def main():
         # Append present to history...
         if 'used' in data:
             present['delta'] = present['used'] - data.used.iloc[-1]
-            data = data.append(present, ignore_index=True)
+            data = pd.concat(data, pd.DataFrame.from_records([present]))
         # ...or start fresh
         else:
             present['delta'] = 0
@@ -229,7 +229,7 @@ def creategraph_pyplot(data, mean, fs):
         color=[palette['green'] if value >= 0 \
             else palette['red'] for value in data.delta])
 
-    ax.grid(b=True, which='major', color='gray', linestyle='-', alpha=.3)
+    ax.grid(visible=True, which='major', color='gray', linestyle='-', alpha=.3)
     [ax.spines[x].set_visible(False) for x in ['top', 'right', 'bottom', 'left']]
     style.use('fivethirtyeight')
     ax.set_facecolor(palette['bg'])
