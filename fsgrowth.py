@@ -73,7 +73,7 @@ def main():
 
     # Set index and normalize datetime
     data['date'] = pd.to_datetime(data['date'])
-    data.set_index('date', inplace=True)
+    data = data.set_index('date')
     data.index = data.index.normalize()
 
     # Warn if missing dates in data
@@ -85,7 +85,7 @@ def main():
     # Calculate some columns
     data['avg'] = data.free.rolling(7).mean().shift(-3)
     data['weekday'] = data.index.weekday
-    data['weekend'] = [True if value >=5 else False for value in data.weekday]
+    data['weekend'] = [True if value >= 5 else False for value in data.weekday]
 
     # Update history file...
     if args.update:
@@ -126,7 +126,7 @@ def main():
         # superfluous columns
         data.index = data.index.normalize()
         data = data[::-1]
-        data.drop(columns=['fs', 'avg'], inplace=True)
+        data = data.drop(columns=['fs', 'avg'], axis=1)
     
         # Send report
         #writereport(data, fs, graph)
