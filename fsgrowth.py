@@ -55,8 +55,8 @@ def main():
 
         # Append present to history...
         if 'used' in data:
-            present['delta'] = present['used'] - data.used.iloc[-1]
-            data = pd.concat(data, pd.DataFrame.from_records([present]))
+            present['delta'] = present['used'] - data['used'].iloc[-1]
+            data = pd.concat([data, pd.DataFrame.from_records([present])])
         # ...or start fresh
         else:
             present['delta'] = 0
@@ -72,6 +72,7 @@ def main():
         exit(-1)
 
     # Set index and normalize datetime
+    data['date'] = pd.to_datetime(data['date'])
     data.set_index('date', inplace=True)
     data.index = data.index.normalize()
 
