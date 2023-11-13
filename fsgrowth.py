@@ -35,7 +35,7 @@ from pretty_html_table import build_table
 hostname = socket.gethostname()
 
 # SMTP server
-smtphost = 'smtp.sebot.local'
+smtphost = 'localhost'
 smtpport = 25
 smtpfrom = 'fsgrowth@addpro.se'
 smtprcvr = 'david.henden@addpro.se'
@@ -376,14 +376,14 @@ def mailreport(data, graph, fs, mean, marker):
         smtpserver = smtplib.SMTP(smtphost, smtpport)
         smtpserver.ehlo()
         smtpserver.sendmail(smtpfrom, smtprcvr, message.as_string())
+        if not args.quiet:
+            print('e-mail sent to {}'.format(smtprcvr))
     except Exception as e:
         print('ERROR: Unable to send e-mail: {}'.format(e))
         exit(-1)
     finally:
         if smtpserver:
             smtpserver.close() 
-            if not args.quiet:
-                print('e-mail sent to {}'.format(smtprcvr))
 
     return None
 
