@@ -2,7 +2,8 @@
 #
 # fsgrowth - report the daily growth of filesystems through mail
 #
-# - Schedule in cron every hour or every day. Delta is given in seconds in report
+# - Schedule in cron every hour or every day
+# - Delta is given in seconds in report
 # - Writes to history file and compare delta
 # - Sends a report every time it's run with diff and delta
 #
@@ -22,7 +23,6 @@ import pandas as pd
 import matplotlib.pyplot as plt
 import matplotlib.dates as mdates
 import matplotlib.style as style
-from matplotlib import rcParams
 # mail
 import smtplib
 from email.message import EmailMessage
@@ -35,10 +35,10 @@ from pretty_html_table import build_table
 hostname = socket.gethostname()
 
 # SMTP server
-smtphost = 'localhost'
+smtphost = 'smtp.sebot.local'
 smtpport = 25
-smtpfrom = 'fsgrowth@addpro.se'
-smtprcvr = 'david.henden@addpro.se'
+smtpfrom = 'dp-tickdb01@addpro.net'
+smtprcvr = 'david@davidata.se'
 
 # }}}
 # def main(): {{{
@@ -223,9 +223,10 @@ def creategraph_pyplot(data, mean, fs):
     # Free
     plt.plot(mdates.date2num(list(data.index)), data.free, linewidth=3,
              color=palette['blue'])
-#    # Rolling 7day average
+#    # Rolling 7day average [useless, this just overwrites the "normal" line]
 #    plt.plot(mdates.date2num(list(data.index)), data.avg, linewidth=3,
 #        color=palette['yellow'])
+
     # Delta change
     plt.bar(mdates.date2num(list(data.index)), data.delta, alpha=.5,
             align='center',
@@ -271,7 +272,7 @@ def creategraph_pyplot(data, mean, fs):
     else:
         # Put a text box in upper right corner with some stats
         props = dict(boxstyle='square', facecolor='wheat', alpha=.6, pad=.5)
-        ax.text(.9, .8, 'Mean growth: {}\nPositive mean growth: {}\nOut of'
+        ax.text(.5, .5, 'Mean growth: {}\nPositive mean growth: {}\nOut of'
                 ' space in {} days'.format(mean['total'], mean['positive'],
                                            mean['days']),
                 transform=ax.transAxes, fontsize=14, va='center', ha='center',
@@ -369,7 +370,7 @@ def mailreport(data, graph, fs, mean, marker):
         </table>
     </body>
 </html>
-""".format(hostname=hostname, table=html_table, img_cid=img_cid[1:-1]),
+""".format(table=html_table, img_cid=img_cid[1:-1]),
         subtype='html')
     message.get_payload()[0].add_related(graph, 'image', 'png', cid=img_cid)
 
