@@ -10,40 +10,34 @@
 # pip3 install matplotlib pandas pretty_html_table
 #
 # -----------------------------------------------------------------------------
-# Imports {{{
-import socket
-import shutil
-import io
-import os
+
+# Imports
 import argparse
-import math
 from datetime import datetime, timedelta
-# graph
-import pandas as pd
-import matplotlib.pyplot as plt
-import matplotlib.dates as mdates
-import matplotlib.style as style
-# mail
-import smtplib
 from email.message import EmailMessage
 from email.headerregistry import Address
 from email.utils import make_msgid
+import io
+import math
+import os
+import shutil
+import smtplib
+import socket
+
+import matplotlib.pyplot as plt
+import matplotlib.dates as mdates
+import matplotlib.style as style
+import pandas as pd
 from pretty_html_table import build_table
 
-# }}}
-# Config {{{
 hostname = socket.gethostname()
-
-# SMTP server
 smtphost = 'smtp.sebot.local'
 smtpport = 25
 smtpfrom = 'dp-tickdb01@addpro.net'
 smtprcvr = 'david@davidata.se'
 
-# }}}
-# def main(): {{{
-# -----------------------------------------------------------------------------
 
+# -----------------------------------------------------------------------------
 
 def main():
     """Load history, collect data, save history, send an e-mail report"""
@@ -71,7 +65,7 @@ def main():
     if not isinstance(data, pd.DataFrame):
         print('ERROR: Have neither history nor new data to work with.'
               'Please provide at least one')
-        exit(-1)
+        raise SystemExit(1)
 
     # Set index and normalize datetime
     data['date'] = pd.to_datetime(data['date'])
@@ -81,8 +75,8 @@ def main():
     # Warn if missing dates in data
     data = data.asfreq('D')
     for date in data.index[data['total'].isnull()]:
-        print('WARNING: Missing date {}'
-              .format(date.to_pydatetime().date().isoformat()))
+        print(f'WARNING: Missing date {
+              date.to_pydatetime().date().isoformat()}')
 
     # Calculate some columns
     data['avg'] = data.free.rolling(7).mean().shift(-3)
@@ -94,11 +88,11 @@ def main():
         try:
             data.to_csv(args.history_file)
             if not args.quiet:
-                print('Updated history file: {}'.format(args.history_file))
+                print(f'Updated history file: {args.history_file}')
         except Exception as e:
-            print('ERROR: Unable to update history file {}: {}'
-                  .format(args.history_file, e))
-            exit(-1)
+            print(f'ERROR: Unable to update history file {
+                  args.history_file}: {e}')
+            raise SystemExit(1)
     # ...or not!
     else:
         if not args.quiet:
@@ -141,10 +135,9 @@ def main():
     return None
 
 
-# }}}
-# def loadhistory(history_file) {{{
 # -----------------------------------------------------------------------------
-def loadhistory(history_file):
+
+def loadhistory(history_file) -> pd.DataFrame:
     """Load history from pickle or csv"""
     history = {}
 
@@ -155,31 +148,28 @@ def loadhistory(history_file):
                 begin = history['date'].iloc[0]
                 end = history['date'].iloc[-1]
 
-                print('Loaded history file {} with {} data points from'
-                      ' {} to {}'
-                      .format(history_file, len(history), begin, end))
+                print(f'Loaded history file {history_file} with {len(history)}'
+                      f' data points from {begin} to {end}')
         except Exception as e:
-            print('ERROR: Unable to load history file {}: {}'
-                  .format(history_file, e))
-            exit(-1)
+            print(f'ERROR: Unable to load history file {history_file}: {e}')
+            raise SystemExit(1)
     else:
         if not args.quiet:
-            print('Did not load history file {}'.format(history_file))
+            print(f'Did not load history file {history_file}')
 
     return history
 
 
-# }}}
-# def collectdata(): {{{
 # -----------------------------------------------------------------------------
-def collectdata(fs):
+
+def collectdata(fs) -> dict:
     """Collect data from all file systems and return as an array"""
 
     now = datetime.now().replace(microsecond=0)
 
     try:
-        [total, used, free] = map(lambda x: int(round(x / 1024 / 1024 / 1024)),
-                                  shutil.disk_usage(fs))
+        total, used, free = map(lambda x: int(round(x / 1024 / 1024 / 1024)),
+                                shutil.disk_usage(fs))
 
         # Get pct
         if total == 0:
@@ -190,18 +180,17 @@ def collectdata(fs):
         fsvalues = {'date': now, 'fs': fs, 'total': total, 'used': used,
                     'free': free, 'pct': pct}
     except Exception as e:
-        print('ERROR: collecting filesystem data: {}'.format(e))
-        exit(-1)
+        print(f'ERROR: collecting filesystem data: {e}')
+        raise SystemExit(1)
 
     if not args.quiet:
-        print('Collected data for filesystem: {}'.format(fs))
+        print(f'Collected data for filesystem: {fs}')
 
     return fsvalues
 
 
-# }}}
-# def creategraph_pyplot(data): {{{
 # -----------------------------------------------------------------------------
+
 def creategraph_pyplot(data, mean, fs):
     """Plot a beautiful graph and return a png in a string"""
 
@@ -218,7 +207,7 @@ def creategraph_pyplot(data, mean, fs):
     # Create the plots
     fig, ax = plt.subplots(figsize=(12, 4))
     plt.gcf().subplots_adjust(bottom=0.20)
-    plt.title('Free GB by day - {}:{}'.format(hostname, fs), fontsize=16)
+    plt.title('Free GB by day - {hostname}:{fs}', fontsize=16)
 
     # Free
     plt.plot(mdates.date2num(list(data.index)), data.free, linewidth=3,
@@ -272,9 +261,10 @@ def creategraph_pyplot(data, mean, fs):
     else:
         # Put a text box in upper right corner with some stats
         props = dict(boxstyle='square', facecolor='wheat', alpha=.6, pad=.5)
-        ax.text(.5, .5, 'Mean growth: {}\nPositive mean growth: {}\nOut of'
-                ' space in {} days'.format(mean['total'], mean['positive'],
-                                           mean['days']),
+        ax.text(.5, .5,
+                f'Mean growth: {mean['total']}\n'
+                f'Positive mean growth: {mean['positive']}\n'
+                f'Out of space in {mean['days']} days',
                 transform=ax.transAxes, fontsize=14, va='center', ha='center',
                 bbox=props)
 
@@ -288,10 +278,9 @@ def creategraph_pyplot(data, mean, fs):
     return graph.read()
 
 
-# }}}
-# def writereport(data): {{{
 # -----------------------------------------------------------------------------
-def writereport(table, graph):
+
+def writereport(table, graph) -> None:
 
     html_table = build_table(table.reset_index(), 'grey_light',
                              font_size='small', font_family='Verdana')
@@ -322,15 +311,15 @@ def writereport(table, graph):
     f.close()
 
     if not args.quiet:
-        print('Wrote report to disk: {}'.format(reportfile))
+        print(f'Wrote report to disk: {reportfile}')
 
     return None
 
 
-# }}}
-# def mailreport(data, graph, fs, mean, marker): {{{
 # -----------------------------------------------------------------------------
-def mailreport(data, graph, fs, mean, marker):
+
+def mailreport(data: pd.DataFrame, graph: bytes, fs: str, mean: dict,
+               marker: str) -> None:
     """Build the e-mail report and send it"""
 
     html_table = build_table(data.reset_index(), 'grey_light',
@@ -340,8 +329,8 @@ def mailreport(data, graph, fs, mean, marker):
     message = EmailMessage()
     message['From'] = Address(smtpfrom)
     message['To'] = Address(smtprcvr)
-    message['Subject'] = '{}: File system {}:{} has {}GB free ({} days)'.format(marker,
-                                                                                hostname, fs, data['free'].iloc[0], mean['days'])
+    message['Subject'] = f'{marker}: File system {hostname}:{fs} ' \
+        f'has {data['free'].iloc[0]} GB free ({mean['days']} days)'
 
     # Attach a body and our image
     img_cid = make_msgid()
@@ -381,10 +370,10 @@ def mailreport(data, graph, fs, mean, marker):
         smtpserver.ehlo()
         smtpserver.sendmail(smtpfrom, smtprcvr, message.as_string())
         if not args.quiet:
-            print('e-mail sent to {}'.format(smtprcvr))
+            print(f'E-mail sent to {smtprcvr}')
     except Exception as e:
-        print('ERROR: Unable to send e-mail: {}'.format(e))
-        exit(-1)
+        print(f'ERROR: Unable to send e-mail: {e}')
+        raise SystemExit(1)
     finally:
         if smtpserver:
             smtpserver.close()
@@ -392,29 +381,29 @@ def mailreport(data, graph, fs, mean, marker):
     return None
 
 
-# }}}
-# __main__ {{{
 # -----------------------------------------------------------------------------
+
 if __name__ == '__main__':
     """Parse arguments and call main"""
 
     parser = argparse.ArgumentParser(description='fsgrowth')
     parser.add_argument('--days', '-d', type=int, default=30,
-                        help='Number of days to report on counting backwards from today. Default 30')
+                        help='Number of days to report on counting backwards '
+                        'from today. Default 30')
     parser.add_argument('--filesystem', '-f', type=str,
-                        required=True, help='Filesystem to report on. Required')
+                        required=True, help='Filesystem to report on. '
+                        'Required')
     parser.add_argument('--history-file', '-H', type=str,
                         required=True, help='History file to use. Required')
     parser.add_argument('--marker', '-m', type=str,
-                        help='Put this string as a marker in the beginning of the e-mail report subject. Good for filtering')
+                        help='Put this string as a marker in the beginning '
+                        'of the e-mail report subject. Good for filtering')
     parser.add_argument('--quiet', '-q', action='store_true',
-                        help='Be quiet. Dont print any output except for errors. Great for crontab')
+                        help='Be quiet. Dont print any output except for '
+                        'errors. Great for crontab')
     parser.add_argument('--report', '-r', action='store_true',
                         help='Create and e-mail a report')
     parser.add_argument('--update', '-u', action='store_true',
                         help='Collect new data and update the history file')
     args = parser.parse_args()
     main()
-
-
-# }}}
