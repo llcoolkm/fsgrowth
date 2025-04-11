@@ -2,12 +2,13 @@
 #
 # fsgrowth - report the daily growth of filesystems through mail
 #
-# - Schedule in cron every hour or every day. Delta is given in seconds in report
+# - Schedule in cron every hour or every day. Delta is given in seconds in
+#   report
 # - Writes to history file and compare delta
 # - Sends a report every time it's run with diff and delta
-#   
-# 
-#------------------------------------------------------------------------------
+#
+#
+# ------------------------------------------------------------------------------
 # Imports {{{
 import smtplib
 import socket
@@ -31,7 +32,9 @@ smtprcvr = 'david.henden@addpro.se'
 
 # }}}
 # def main(): {{{
-#------------------------------------------------------------------------------
+# ------------------------------------------------------------------------------
+
+
 def main():
 
     # Check for old data to compare with
@@ -43,7 +46,7 @@ def main():
     # Setup a template and print headers
     template = '{0:30} {1:10} {2:>7} {3:>7} {4:>7} {5:>4} {6:>7} {7:>7}'
     headers = template.format('Filesystem', 'Datetime', 'Total', 'Used',
-        'Free', 'Pct', 'Diff', 'Delta')
+                              'Free', 'Pct', 'Diff', 'Delta')
     template = '{0:30} {1:%Y-%m-%d} {2:>7,d} {3:>7,d} {4:>7,d} {5:>3,d}% {6:>7,d} {7:>7,d}'
 
     # Loop file systems
@@ -52,7 +55,7 @@ def main():
     for fs in filesystems:
         try:
             [total, used, free] = map(lambda x: round(x / 1024 / 1024 / 1024),
-                 shutil.disk_usage(fs))
+                                      shutil.disk_usage(fs))
             pct = round((used / total) * 100)
 
             # Add some deltas if we have a history
@@ -73,13 +76,13 @@ def main():
     olddata = []
     for fs, metrics in history.items():
         olddata.append(template.format(fs, metrics[0], metrics[1], metrics[2],
-             metrics[3], metrics[4], metrics[5], round(metrics[6].seconds / 3600)))
+                                       metrics[3], metrics[4], metrics[5], round(metrics[6].seconds / 3600)))
 
     # Prettify contemporary
     data = []
     for fs, metrics in fstotal.items():
         data.append(template.format(fs, metrics[0], metrics[1], metrics[2],
-             metrics[3], metrics[4], metrics[5], round(metrics[6].seconds / 3600)))
+                                    metrics[3], metrics[4], metrics[5], round(metrics[6].seconds / 3600)))
 
     olddata = '\n'.join(olddata)
     data = '\n'.join(data)
@@ -93,17 +96,17 @@ def main():
 
     # Report to master
     sendreport(headers, data, olddata)
-    
+
     return None
 
 
 # }}}
 # def sendmail(data): {{{
-#------------------------------------------------------------------------------
+# ------------------------------------------------------------------------------
 def sendreport(headers, data, olddata):
     """Send email report"""
 
-    message = """Subject: {environment} file system growth report for {hostname}
+    message = """Subject: {environment} file system growth report on {hostname}
 
 {headers}
 {data}
@@ -120,13 +123,14 @@ LAST REPORT
         smtpserver = smtplib.SMTP(smtphost, smtpport)
         smtpserver.ehlo()
         smtpserver.sendmail(smtpfrom, smtprcvr, message
-            .format(environment=environment, headers=headers, data=data,
-                olddata=olddata, hostname=hostname))
+                            .format(environment=environment, headers=headers,
+                                    data=data, olddata=olddata,
+                                    hostname=hostname))
     except Exception as e:
         print(e)
     finally:
         if smtpserver:
-            smtpserver.quit() 
+            smtpserver.quit()
 
     return None
 
@@ -135,4 +139,3 @@ LAST REPORT
 
 if __name__ == '__main__':
     main()
-

@@ -13,28 +13,25 @@
 
 # Imports
 import argparse
+import base64
 from datetime import datetime, timedelta
-from email.message import EmailMessage
-from email.headerregistry import Address
-from email.utils import make_msgid
 import io
+import json
 import math
 import os
+import requests
 import shutil
-import smtplib
-import socket
+import sys
 
+from dotenv import load_dotenv
 import matplotlib.pyplot as plt
 import matplotlib.dates as mdates
 import matplotlib.style as style
+import msal
 import pandas as pd
 from pretty_html_table import build_table
 
-hostname = socket.gethostname()
-smtphost = 'smtp.sebot.local'
-smtpport = 25
-smtpfrom = 'dp-tickdb01@addpro.net'
-smtprcvr = 'david@davidata.se'
+hostname = os.uname()[1]
 
 
 # -----------------------------------------------------------------------------
@@ -59,11 +56,11 @@ def main():
             data = pd.DataFrame([present])
     else:
         if not args.quiet:
-            print('Did not collect new data')
+            print('Did not collect new data.')
 
     # Die if we don't have a dataframe to play with
     if not isinstance(data, pd.DataFrame):
-        print('ERROR: Have neither history nor new data to work with.'
+        print('ERROR: Have neither history nor new data to work with. '
               'Please provide at least one')
         raise SystemExit(1)
 
@@ -73,7 +70,12 @@ def main():
     data.index = data.index.normalize()
 
     # Warn if missing dates in data
-    data = data.asfreq('D')
+    try:
+        data = data.asfreq('D')
+    except Exception as e:
+        print(f'ERROR: Data for today already exists: {e}')
+        raise SystemExit(1)
+
     for date in data.index[data['total'].isnull()]:
         print(f'WARNING: Missing date {
               date.to_pydatetime().date().isoformat()}')
@@ -90,13 +92,13 @@ def main():
             if not args.quiet:
                 print(f'Updated history file: {args.history_file}')
         except Exception as e:
-            print(f'ERROR: Unable to update history file {
-                  args.history_file}: {e}')
+            print(f'ERROR: Unable to update history file '
+                  f'{args.history_file}: {e}')
             raise SystemExit(1)
     # ...or not!
     else:
         if not args.quiet:
-            print('Did not update history file')
+            print('Did not update history file.')
 
     # Since we have now saved history we are free to truncate our work sample
     # to the requested reporting period
@@ -130,7 +132,7 @@ def main():
     # ...or not!
     else:
         if not args.quiet:
-            print('Did not send a report')
+            print('Did not send a report.')
 
     return None
 
@@ -149,13 +151,13 @@ def loadhistory(history_file) -> pd.DataFrame:
                 end = history['date'].iloc[-1]
 
                 print(f'Loaded history file {history_file} with {len(history)}'
-                      f' data points from {begin} to {end}')
+                      f' data points from {begin} to {end}.')
         except Exception as e:
             print(f'ERROR: Unable to load history file {history_file}: {e}')
             raise SystemExit(1)
     else:
         if not args.quiet:
-            print(f'Did not load history file {history_file}')
+            print(f'Did not load history file {history_file}.')
 
     return history
 
@@ -180,7 +182,7 @@ def collectdata(fs) -> dict:
         fsvalues = {'date': now, 'fs': fs, 'total': total, 'used': used,
                     'free': free, 'pct': pct}
     except Exception as e:
-        print(f'ERROR: collecting filesystem data: {e}')
+        print(f'ERROR: Unable to collect filesystem data: {e}')
         raise SystemExit(1)
 
     if not args.quiet:
@@ -191,7 +193,7 @@ def collectdata(fs) -> dict:
 
 # -----------------------------------------------------------------------------
 
-def creategraph_pyplot(data, mean, fs):
+def creategraph_pyplot(data: pd.DataFrame, mean: dict, fs: str):
     """Plot a beautiful graph and return a png in a string"""
 
     # fivethirtyeight palette
@@ -201,13 +203,22 @@ def creategraph_pyplot(data, mean, fs):
         'yellow': '#e5ae38',
         'green': '#6d904f',
         'gray': '#8b8b8b',
-        'bg': '#f0f0f0'
+        'bg': '#f0f0f0',
+        'weekend': '#ffeeee'
     }
 
     # Create the plots
     fig, ax = plt.subplots(figsize=(12, 4))
     plt.gcf().subplots_adjust(bottom=0.20)
-    plt.title('Free GB by day - {hostname}:{fs}', fontsize=16)
+    plt.title(f'Free GB by day - {hostname}:{fs}', fontsize=16)
+
+    # Highlight weekends
+    for i, (date, row) in enumerate(data.iterrows()):
+        if row['weekend']:
+            ax.axvspan(mdates.date2num(date) - 0.5,
+                       mdates.date2num(date) + 0.5,
+                       color=palette['weekend'],
+                       alpha=0.3)
 
     # Free
     plt.plot(mdates.date2num(list(data.index)), data.free, linewidth=3,
@@ -322,25 +333,29 @@ def mailreport(data: pd.DataFrame, graph: bytes, fs: str, mean: dict,
                marker: str) -> None:
     """Build the e-mail report and send it"""
 
-    html_table = build_table(data.reset_index(), 'grey_light',
-                             font_size='small', font_family='Verdana')
+    load_dotenv()
 
-    # Create an e-mail
-    message = EmailMessage()
-    message['From'] = Address(smtpfrom)
-    message['To'] = Address(smtprcvr)
-    message['Subject'] = f'{marker}: File system {hostname}:{fs} ' \
-        f'has {data['free'].iloc[0]} GB free ({mean['days']} days)'
+    # MSAL variables
+    client_id = os.getenv('CLIENT_ID')
+    client_secret = os.getenv('CLIENT_SECRET')
+    tenant_id = os.getenv('TENANT_ID')
+    mailrcvr = os.getenv('MAILRCVR')
+    mailfrom = os.getenv('MAILFROM')
+    authority = f'https://login.microsoftonline.com/{tenant_id}'
+    scope = ['https://graph.microsoft.com/.default']
 
-    # Attach a body and our image
-    img_cid = make_msgid()
-    message.add_alternative("""\
-<!DOCTYPE html PUBLIC "-//W3C//DTD XHTML 1.0 Transitional//EN" "http://www.w3.org/TR/xhtml1/DTD/xhtml1-transitional.dtd">
-<html xmlns="http://www.w3.org/1999/xhtml">
+    # Create our content
+    subject = f'{marker}: File system {hostname}:{fs} has ' \
+        f'{data["free"].iloc[0]} GB free ({mean["days"]} days)'
+    graphb64 = base64.b64encode(graph).decode('utf-8')
+    htmltable = build_table(data.reset_index(), 'grey_light',
+                            font_size='small', font_family='Verdana')
+    htmlbody = f"""\
+<!DOCTYPE html>
+<html>
     <head>
         <meta http-equiv="Content-Type" content="text/html; charset=UTF-8" />
-        <title></title>
-        <style></style>
+        <title>Filesystem Report</title>
     </head>
     <body>
         <table border="0" cellpadding="0" cellspacing="0" height="100%" width="100%" id="bodyTable">
@@ -349,8 +364,12 @@ def mailreport(data: pd.DataFrame, graph: bytes, fs: str, mean: dict,
                     <table border="0" cellpadding="20" cellspacing="0" width="600" id="emailContainer">
                         <tr>
                             <td align="center" valign="top">
-                                <tr><p><img src="cid:{img_cid}"></p></tr>
-                                <tr><p>{table}</p></tr>
+                                <img src="data:image/png;base64,{graphb64}" alt="Filesystem Graph" />
+                            </td>
+                        </tr>
+                        <tr>
+                            <td align="center" valign="top">
+                                {htmltable}
                             </td>
                         </tr>
                     </table>
@@ -359,29 +378,70 @@ def mailreport(data: pd.DataFrame, graph: bytes, fs: str, mean: dict,
         </table>
     </body>
 </html>
-""".format(table=html_table, img_cid=img_cid[1:-1]),
-        subtype='html')
-    message.get_payload()[0].add_related(graph, 'image', 'png', cid=img_cid)
+"""
 
-    # Send it
-    smtpserver = None
-    try:
-        smtpserver = smtplib.SMTP(smtphost, smtpport)
-        smtpserver.ehlo()
-        smtpserver.sendmail(smtpfrom, smtprcvr, message.as_string())
-        if not args.quiet:
-            print(f'E-mail sent to {smtprcvr}')
-    except Exception as e:
-        print(f'ERROR: Unable to send e-mail: {e}')
+    access_token = get_access_token(client_id, client_secret, authority, scope)
+
+    headers = {
+        'Authorization': f'Bearer {access_token}',
+        'Content-Type': 'application/json'
+    }
+
+    email_data = {
+        "message": {
+            "subject": subject,
+            "body": {
+                "contentType": "HTML",
+                "content": htmlbody
+            },
+            'from': {
+                'emailAddress': {
+                    'address': mailfrom
+                }
+            },
+            'toRecipients': [
+                {
+                    'emailAddress': {
+                        'address': mailrcvr
+                    }
+                }
+            ]
+        }
+    }
+    endpoint = f'https://graph.microsoft.com/v1.0/users/{mailfrom}/sendMail'
+    response = requests.post(
+        endpoint,
+        headers=headers,
+        data=json.dumps(email_data)
+    )
+    if response.status_code != 202:
+        sys.stderr.write(f'Error sending email: {response.status_code} - '
+                         f"{response.text}")
         raise SystemExit(1)
-    finally:
-        if smtpserver:
-            smtpserver.close()
+
+    if not args.quiet:
+        print('E-mail sent')
 
     return None
 
 
 # -----------------------------------------------------------------------------
+
+def get_access_token(client_id: str, client_secret: str, authority: str,
+                     scope: dict):
+    app = msal.ConfidentialClientApplication(client_id,
+                                             authority=authority,
+                                             client_credential=client_secret
+                                             )
+    result = app.acquire_token_for_client(scopes=scope)
+    if 'access_token' in result:
+        return result['access_token']
+    else:
+        raise Exception('Failed to acquire token',
+                        result.get('error'), result.get('error_description'))
+
+# -----------------------------------------------------------------------------
+
 
 if __name__ == '__main__':
     """Parse arguments and call main"""
